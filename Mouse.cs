@@ -36,6 +36,7 @@ namespace CatAndMouse
         readonly Cat cat;
         readonly List<Hole> holes;
         readonly Random rng = new Random();
+        readonly float speedScale, panicScale;
 
         float wanderAngle;
         float clock;         // running time, drives the wobble and meander
@@ -43,12 +44,15 @@ namespace CatAndMouse
         float hideCooldown;
         Hole currentHole;
 
-        public Mouse(Texture2D texture, Vector2 position, Rectangle playArea, Cat cat, List<Hole> holes)
+        public Mouse(Texture2D texture, Vector2 position, Rectangle playArea, Cat cat, List<Hole> holes,
+                     float speedScale = 1f, float panicScale = 1f)
             : base(texture, position)
         {
             PlayArea = playArea;
             this.cat = cat;
             this.holes = holes;
+            this.speedScale = speedScale;
+            this.panicScale = panicScale;
             RadiusFactor = 0.36f;
             LayerDepth = 0.5f;
             wanderAngle = (float)(rng.NextDouble() * MathHelper.TwoPi);
@@ -68,14 +72,14 @@ namespace CatAndMouse
 
             // --- choose state ---
             float distToCat = Vector2.Distance(Position, cat.Position);
-            Behavior = distToCat < PanicRadius ? MouseBehavior.Flee : MouseBehavior.Wander;
+            Behavior = distToCat < PanicRadius * panicScale ? MouseBehavior.Flee : MouseBehavior.Wander;
 
             // --- choose desired direction + speed for this state ---
             Vector2 desiredDir;
             float speed, wobble;
             if (Behavior == MouseBehavior.Flee)
             {
-                speed = FleeSpeed;
+                speed = FleeSpeed * speedScale;
                 wobble = FleeWobble;
                 Hole target = hideCooldown <= 0f ? PickEscapeHole() : null;
                 desiredDir = target != null
@@ -84,7 +88,7 @@ namespace CatAndMouse
             }
             else
             {
-                speed = WanderSpeed;
+                speed = WanderSpeed * speedScale;
                 wobble = WanderWobble;
                 // Smooth, deterministic meandering (two sine waves) - frame-rate independent
                 wanderAngle += (MathF.Sin(clock * 0.9f) + MathF.Sin(clock * 2.3f)) * 0.9f * dt;
@@ -120,7 +124,7 @@ namespace CatAndMouse
             Visible = true;
             Behavior = MouseBehavior.Wander;
             hideCooldown = HideCooldown;
-            Velocity = SafeNormalize(Position - cat.Position) * FleeSpeed * 0.5f;
+            Velocity = SafeNormalize(Position - cat.Position) * FleeSpeed * speedScale * 0.5f;
             currentHole = null;
         }
 

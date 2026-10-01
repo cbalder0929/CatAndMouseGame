@@ -8,7 +8,8 @@ namespace CatAndMouse
 {
     public class Game1 : Game
     {
-        enum GameState { Playing, CatWon, MouseWon }
+        enum GameState { Menu, Playing, CatWon, MouseWon }
+        enum Difficulty { Easy, Medium, Hard }
 
         const float RoundDuration = 45f;   // mouse wins if the cat hasn't caught it by then
 
@@ -18,7 +19,10 @@ namespace CatAndMouse
         Texture2D catTexture, mouseTexture, holeTexture, pixel;
 
         Cat cat;
-        Mouse mouse;
+        readonly List<Mouse> mice = new List<Mouse>();
+        Difficulty difficulty = Difficulty.Easy;
+        readonly Rectangle[] menuButtons = new Rectangle[3];
+        Rectangle menuButton;
         readonly List<Hole> holes = new List<Hole>();
         readonly List<Sprite> sprites = new List<Sprite>();  // updated/drawn polymorphically
 
@@ -64,7 +68,12 @@ namespace CatAndMouse
             resetButton = new Rectangle((playArea.Width - buttonWidth) / 2,
                                          (int)(playArea.Height * 0.6f), buttonWidth, buttonHeight);
 
+            for (int i = 0; i < menuButtons.Length; i++)
+                menuButtons[i] = new Rectangle((playArea.Width - 240) / 2, (int)(playArea.Height * 0.38f) + i * 76, 240, 56);
+            menuButton = new Rectangle(resetButton.X, resetButton.Bottom + 16, buttonWidth, buttonHeight);
+
             ResetGame();
+            state = GameState.Menu;
         }
 
         void ResetGame()
@@ -82,10 +91,20 @@ namespace CatAndMouse
             foreach (Vector2 p in holeSpots) holes.Add(new Hole(holeTexture, p));
 
             cat   = new Cat(catTexture, new Vector2(w * 0.25f, h * 0.5f), playArea);
-            mouse = new Mouse(mouseTexture, new Vector2(w * 0.75f, h * 0.5f), playArea, cat, holes);
+
+            // Easy: 1 normal mouse. Medium: 1 mouse, 25% faster and warier. Hard: 4 mice, 25% faster.
+            float speed = difficulty == Difficulty.Easy ? 1f : 1.25f;
+            float panic = difficulty == Difficulty.Medium ? 1.25f : 1f;
+            int count = difficulty == Difficulty.Hard ? 4 : 1;
+            mice.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                float y = count == 1 ? 0.5f : 0.2f + 0.6f * i / (count - 1);
+                mice.Add(new Mouse(mouseTexture, new Vector2(w * 0.75f, h * y), playArea, cat, holes, speed, panic));
+            }
 
             sprites.AddRange(holes);
-            sprites.Add(mouse);
+            sprites.AddRange(mice);
             sprites.Add(cat);
 
             state = GameState.Playing;
@@ -107,15 +126,42 @@ namespace CatAndMouse
                 TargetElapsedTime = TimeSpan.FromSeconds(1.0 / 30.0);
             }
 
-            if (state == GameState.Playing)
+            bool clicked = mouseState.LeftButton == ButtonState.Pressed &&
+                           prevMouseState.LeftButton == ButtonState.Released;
+
+            if (state == GameState.Menu)
+            {
+                int pick = -1;
+                for (int i = 0; i < menuButtons.Length; i++)
+                    if (clicked && menuButtons[i].Contains(mouseState.Position)) pick = i;
+                if (Pressed(keys, Keys.D1)) pick = 0;
+                if (Pressed(keys, Keys.D2)) pick = 1;
+                if (Pressed(keys, Keys.D3)) pick = 2;
+
+                if (pick >= 0)
+                {
+                    difficulty = (Difficulty)pick;
+                    ResetGame();
+                }
+            }
+            else if (state == GameState.Playing)
             {
                 roundTime += dt;
                 foreach (Sprite s in sprites) s.Update(gameTime);
 
-                if (!mouse.IsHidden && cat.CollidesWith(mouse))
+                for (int i = mice.Count - 1; i >= 0; i--)
+                {
+                    if (!mice[i].IsHidden && cat.CollidesWith(mice[i]))
+                    {
+                        sprites.Remove(mice[i]);
+                        mice.RemoveAt(i);
+                        catScore++;
+                    }
+                }
+
+                if (mice.Count == 0)
                 {
                     state = GameState.CatWon;
-                    catScore++;
                 }
                 else if (TimeLeft <= 0f)
                 {
@@ -124,11 +170,11 @@ namespace CatAndMouse
             }
             else
             {
-                bool clickedReset = mouseState.LeftButton == ButtonState.Pressed &&
-                                     prevMouseState.LeftButton == ButtonState.Released &&
-                                     resetButton.Contains(mouseState.Position);
+                bool clickedReset = clicked && resetButton.Contains(mouseState.Position);
 
-                if (clickedReset || Pressed(keys, Keys.Enter))
+                if ((clicked && menuButton.Contains(mouseState.Position)) || Pressed(keys, Keys.M))
+                    state = GameState.Menu;
+                else if (clickedReset || Pressed(keys, Keys.Enter))
                     ResetGame();
             }
 
@@ -153,6 +199,20 @@ namespace CatAndMouse
 
             spriteBatch.Begin();
 
+            if (state == GameState.Menu)
+            {
+                DrawTextCentered("CAT & MOUSE - Select Difficulty", playArea.Height * 0.22f, Color.Black);
+                string[] labels = { "1  EASY", "2  MEDIUM", "3  HARD" };
+                for (int i = 0; i < menuButtons.Length; i++)
+                {
+                    spriteBatch.Draw(pixel, menuButtons[i], Color.SaddleBrown);
+                    DrawTextCenteredIn(labels[i], menuButtons[i], Color.White);
+                }
+                spriteBatch.End();
+                base.Draw(gameTime);
+                return;
+            }
+
             spriteBatch.DrawString(font, $"Time: {TimeLeft:0}", new Vector2(16, 12), Color.Black);
             DrawTextRightAligned($"Cat Score: {catScore}", 16, Color.Black);
             spriteBatch.DrawString(font,
@@ -166,12 +226,14 @@ namespace CatAndMouse
                 spriteBatch.Draw(pixel, playArea, null, overlay * 0.3f, 0f, Vector2.Zero, SpriteEffects.None, 0f);
 
                 string message = state == GameState.CatWon
-                    ? "CAT WINS! The mouse got caught."
+                    ? "CAT WINS! All mice caught."
                     : "MOUSE WINS! Time ran out.";
                 DrawTextCentered(message, playArea.Height * 0.30f, Color.Black);
 
                 spriteBatch.Draw(pixel, resetButton, Color.SaddleBrown);
                 DrawTextCenteredIn("RESET", resetButton, Color.White);
+                spriteBatch.Draw(pixel, menuButton, Color.SaddleBrown);
+                DrawTextCenteredIn("MENU", menuButton, Color.White);
             }
 
             spriteBatch.End();
